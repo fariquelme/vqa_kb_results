@@ -1,498 +1,1352 @@
-
-
-```python
-from matplotlib import pyplot as plt
-import matplotlib as mpl
-from caffe_model_train import *
-from copy import deepcopy
-import json, codecs
-
-```
-
-
-```python
-def heatmap(data, row_labels, col_labels, ax=None, cbar_kw={}, cbarlabel="", **kwargs):
-    fig, ax = plt.subplots(figsize=(50, 5))
-    if not ax:
-        ax = plt.gca()
-    im = ax.imshow(data, **kwargs)
-    ax.set_xticks(np.arange(data.shape[1]))
-    ax.set_yticks(np.arange(data.shape[0]))
-    ax.set_xticklabels(col_labels)
-    ax.set_yticklabels(row_labels)
-    ax.tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
-    plt.setp(ax.get_xticklabels(), rotation=-30, ha="right", rotation_mode="anchor")
-    ax.set_xticks(np.arange(data.shape[1]+1)-.5, minor=True)
-    ax.set_yticks(np.arange(data.shape[0]+1)-.5, minor=True)
-    ax.grid(which="minor", color="w", linestyle='-', linewidth=3)
-    #ax.grid(b=False, which='major', color='0.2', linestyle='-')
-    ax.grid(b=False, which='minor', color='0.2', linestyle='-')
-    ax.tick_params(which="minor", bottom=False, left=False)
-    for spine in plt.gca().spines.values():
-        spine.set_visible(False) #Indentation updated..
-    ax.xaxis.set_ticks_position('none')
-    ax.yaxis.set_ticks_position('none') 
-    return im
-def color_bar(cmap,kb_att,title):
-    fig = plt.figure(figsize=(50, 5))
-    ax1 = fig.add_axes([0.05, 0.80, 0.9, 0.15])
-    norm = mpl.colors.Normalize(vmin=0, vmax=kb_att.max())
-    cb1 = mpl.colorbar.ColorbarBase(ax1, cmap=cmap, norm=norm, orientation='horizontal')
-    cb1.set_label(title,)
-    plt.show()
-    plt.clf()
-  
-def plot_kb_attention_no_hop(top_relations_first_hop,kb_relations,title='',n=50):
-    rel_names = lambda RelIdx: ' '.join(RelIdx[0][0]) + '[' +str(round(RelIdx[2][0],6))+']' +'['+str(RelIdx[1][0]) + ']'
-    top_relations_idx_first_hop = top_relations_first_hop.argsort()[::-1][:n].reshape(-1,1)
-    relations_hop_1 = map(rel_names, zip(kb_relations[top_relations_idx_first_hop],top_relations_idx_first_hop,top_relations_first_hop[top_relations_idx_first_hop]))
-    mpl.rcParams.update({'font.size': 20})
-    cmap = plt.cm.get_cmap('gist_heat_r')
-    color_bar(cmap,top_relations_first_hop[top_relations_idx_first_hop],title)
-    im = heatmap(top_relations_first_hop[top_relations_idx_first_hop].T,['First Hop'],relations_hop_1, cmap=cmap)
-    plt.tight_layout()
-
-def plot_question_summary_no_hop(question,correct_answer):
-    if question == None:
-      outputs = model.make_dataset_question_caffe(None)
-    else:
-      outputs = model.make_dataset_question_caffe(question['question_id'])
-    question_vis={'image_url':'/mnt/nas2/GrimaRepo/datasets/visual_genome/VG_100K_2/' + str(question['image_id']) + '.jpg','question':question['question']}
-    print 'Question [{}]: {}'.format(question['question_id'], question['question'])
-    print 'Correct Answer: ', correct_answer
-    print 'Prediction :',rev_adict[str(outputs[1].argmax())], 
-    top_predictions_labels,top_predictions_labels,ans,image = model.visualize(question_vis, outputs[1], outputs[3], outputs[9],outputs[10], only_picture=True)
-    plot_kb_attention_no_hop(outputs[4],kb_relations,title = 'Network KB Attention')
-    plot_kb_attention_no_hop(outputs[11][0],kb_relations, title = 'KB Attention Labels')
-
-    
-    return outputs
-  
-def plot_custom_question_summary_no_hop(question,image_id):
-    question = {'question':question,'image_id':image_id}
-    outputs = model.make_new_question_caffe(question)
-    question_vis={'image_url':'/mnt/nas2/GrimaRepo/datasets/mscoco/coco2014/{}2014/COCO_{}2014_'.format(split,split) + str(question['image_id']).zfill(12) + '.jpg','question':question['question']}
-    top_predictions_labels,top_predictions_labels,ans,image = model.visualize(question_vis,outputs[1],outputs[3],only_picture=True)
-    plot_kb_attention_no_hop(outputs[4],kb_relations,cmap)
-    return outputs
-```
-
-
-```python
-PATH_PREFIX = '/home/fariquelme/tesis/accuracy_analisys/'
-# Model 1 has kb, model 2 has no kb
-question_types_by_model_dict = json.load(open(PATH_PREFIX + 'question_types_by_model_dict.json','r'))
-annotations_by_type_train = json.load(open(PATH_PREFIX + 'annotations_by_type_train.json','r'))
-    
-annotations_by_type_val = json.load(open(PATH_PREFIX + 'annotations_by_type_val.json','r'))
-```
-
-
-```python
-#RELATIONSHIPS_PATH = '/home/fariquelme/tesis/top_relationships/ top_3000_region_object_relationships.npz'
-#RELATIONSHIPS_PATH = '/home/fariquelme/tesis/top_3000_relationships.npz'
-RELATIONSHIPS_PATH = '/home/fariquelme/tesis/top_relationships/top_3000_supervised_labels_relationships.npz'
-kb_relations = np.load(RELATIONSHIPS_PATH)['relations']
-
-split = 'genome'
-
-
-
-model = VQA_KB('/mnt/nas2/GrimaRepo/fariquelme/KL_result/model_checkpts/qlstm_solver_iter_55000.caffemodel',split)
-#model = VQA_KB('/mnt/nas2/GrimaRepo/fariquelme/KL_result/model_checkpts_kb_v2/test_200000_iters.caffemodel',split)
-#model = VQA_KB('/mnt/nas2/GrimaRepo/fariquelme/KL_result/model_checkpts_kb_v1/test_200000_iters.caffemodel',split)
-
-PATH_PREFIX = '/mnt/nas2/GrimaRepo/fariquelme/vqa_predictions_dict/'
-rev_adict = json.load(open(PATH_PREFIX + 'rev_adict.json'))
-```
-
-    parsed 1026908 questions for genome
-    Loaded adict and vdict
-    reading:  /home/fariquelme/tesis/top_relationships/supervised_labels_top_3000_relationships_glove.npz
-    1026908 total questions
-    Model loaded: /mnt/nas2/GrimaRepo/fariquelme/KL_result/model_checkpts/qlstm_solver_iter_55000.caffemodel
-    Image feature prefix: /mnt/nas2/GrimaRepo/fariquelme/cco_feats/resnet_res5c_bgrms_large/genome2014/COCO_genome2014_
-
-
-
-```python
-#model.dp.get_batch_vec()
-#import config
-#np.load(config.DATA_PATHS['genome']['features_prefix'] + str(2402715) + '.npz')['x']
-#t_att_vec_obj, t_att_vec_region, have_or_not, have_or_not_r = model.dp.get_attn_map(2402715, 466553)
-
-```
-
-
-```python
-def get_supervised_qa():
-  q_with_kb_labels_andimg_labels = True
-  while q_with_kb_labels_andimg_labels:
-    qid = model.dp.getQuesIds()[np.random.choice(len(model.dp.getQuesIds()))]
-    qiid = model.dp.getImgId(qid)
-    if not model.dp.has_at_least_one_valid_answer(qid): continue
-    kb_labels ,has_kb_labels = model.dp.get_kb_attention(str(qiid),qid.split('/')[1])
-    if not has_kb_labels: continue
-    att1,att2,have_qa_att,have_r_att = model.dp.get_attn_map(int(qiid),qid.split('/')[1])
-    if not (have_qa_att and have_r_att): continue
-    ans = model.dp.getAnsObj(qid)
-    qstr = model.dp.getQuesStr(qid)
-    q_with_kb_labels_andimg_labels = False
-    return {'question_id':qid,'question':qstr,'image_id':qiid},ans[0]['answer']
-
-```
-
 ## QA'S with Image and KB labels
 
+    Question [genome/1424012]: What tall animal has brown and white spots?
+    Correct Answer:  giraffe
+    Prediction : giraffe
 
-```python
-n_examples = 10
-for i in range(n_examples):
-  # Get question with KB labls and IMG ATT
-  question,ans = get_supervised_qa()
-  plot_question_summary_no_hop(question,ans)
-  plt.show()
-```
 
-     Question [genome/998382]: What color is person hair?
+![png](output_10_1.png)
+
+
+
+![png](output_10_2.png)
+
+
+
+
+![png](output_10_4.png)
+
+
+
+![png](output_10_5.png)
+
+
+
+
+
+![png](output_10_7.png)
+
+
+     Relveant Visual Genome relations
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>giraffe reaches for th tree</td>
+      <td>power lines in sky</td>
+      <td>neck of giraffe</td>
+      <td>fence has post</td>
+      <td>giraffe in fence</td>
+      <td>giraffe has mouth</td>
+      <td>mouth touching branch</td>
+      <td>leaves on branches</td>
+      <td>giraffe's mouth on branch</td>
+      <td>facility for giraffe</td>
+      <td>building behind giraffe</td>
+      <td>fence surrounding giraffe</td>
+      <td>giraffe standing under tree branches</td>
+      <td>giraffe behind fence</td>
+      <td>powerlines behind fence</td>
+      <td>bricks on building</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>giraffe has mouth</td>
+      <td>mouth touching branch</td>
+      <td>facility for giraffe</td>
+      <td>giraffe's mouth on branch</td>
+      <td>powerlines behind fence</td>
+      <td>bricks on building</td>
+      <td>giraffe behind fence</td>
+      <td>fence surrounding giraffe</td>
+      <td>giraffe standing under tree branches</td>
+      <td>fence has post</td>
+      <td>giraffe in fence</td>
+      <td>power lines in sky</td>
+      <td>giraffe reaches for th tree</td>
+      <td>neck of giraffe</td>
+      <td>leaves on branches</td>
+      <td>building behind giraffe</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    Question [genome/1001235]: What is reflected on the water?
+    Correct Answer:  sunlight
+    Prediction : sun
+
+
+![png](output_10_13.png)
+
+
+
+![png](output_10_14.png)
+
+
+
+
+
+
+![png](output_10_16.png)
+
+
+
+![png](output_10_17.png)
+
+
+
+
+
+
+![png](output_10_19.png)
+
+
+     Relveant Visual Genome relations
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+      <th>16</th>
+      <th>17</th>
+      <th>18</th>
+      <th>19</th>
+      <th>20</th>
+      <th>21</th>
+      <th>22</th>
+      <th>23</th>
+      <th>24</th>
+      <th>25</th>
+      <th>26</th>
+      <th>27</th>
+      <th>28</th>
+      <th>29</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>plane on runway</td>
+      <td>wheels on plane</td>
+      <td>sunlight on water</td>
+      <td>top fo building</td>
+      <td>wing of plane</td>
+      <td>grass along water</td>
+      <td>lights of runway</td>
+      <td>plane at airport</td>
+      <td>plane at airport</td>
+      <td>plane at airport</td>
+      <td>plane at airport</td>
+      <td>tower at airport</td>
+      <td>plane by water</td>
+      <td>grass by water</td>
+      <td>logo on tail</td>
+      <td>tail of plane</td>
+      <td>wheels on plane</td>
+      <td>water near airport</td>
+      <td>logo on tail</td>
+      <td>sign on plane</td>
+      <td>tower of airport</td>
+      <td>plane on runway</td>
+      <td>tower of airport</td>
+      <td>plane at airport</td>
+      <td>fence surrounding airport</td>
+      <td>grass in water</td>
+      <td>water outside airport</td>
+      <td>car at airport</td>
+      <td>lights in airport</td>
+      <td>airport with water</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>tower of airport</td>
+      <td>tower of airport</td>
+      <td>wheels on plane</td>
+      <td>tower at airport</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    Question [genome/1059580]: What color is the man jacket?
     Correct Answer:  black
     Prediction : black
 
 
-![png](output_7_1.png)
-
-
-
-![png](output_7_2.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7ed1ce1d0>
-
-
-
-![png](output_7_4.png)
-
-
-
-![png](output_7_5.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7ed013250>
-
-
-
-![png](output_7_7.png)
-
-
-     Question [genome/1025510]: What is the cake trimmed with?
-    Correct Answer:  ribbon
-    Prediction : glass
-
-
-![png](output_7_9.png)
-
-
-
-![png](output_7_10.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7eccee590>
-
-
-
-![png](output_7_12.png)
-
-
-
-![png](output_7_13.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7ecb16290>
-
-
-
-![png](output_7_15.png)
-
-
-     Question [genome/1052586]: What color is table?
-    Correct Answer:  brown
-    Prediction : brown
-
-
-![png](output_7_17.png)
-
-
-
-![png](output_7_18.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7ec7e50d0>
-
-
-
-![png](output_7_20.png)
-
-
-
-![png](output_7_21.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7ec6250d0>
-
-
-
-![png](output_7_23.png)
-
-
-     Question [genome/1879783]: What is the car color?
-    Correct Answer:  gold
-    Prediction : black
-
-
-![png](output_7_25.png)
-
-
-
-![png](output_7_26.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7ec2de1d0>
-
-
-
-![png](output_7_28.png)
-
-
-
-![png](output_7_29.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7ec0cf2d0>
-
-
-
-![png](output_7_31.png)
-
-
-     Question [genome/1103258]: What is woman's left hand?
-    Correct Answer:  bag
-    Prediction : purse
-
-
-![png](output_7_33.png)
-
-
-
-![png](output_7_34.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7ebdf0e50>
-
-
-
-![png](output_7_36.png)
-
-
-
-![png](output_7_37.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7ebbd0b50>
-
-
-
-![png](output_7_39.png)
-
-
-     Question [genome/1679619]: Where is the wood panel?
-    Correct Answer:  wall
-    Prediction : floor
-
-
-![png](output_7_41.png)
-
-
-
-![png](output_7_42.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7eb881090>
-
-
-
-![png](output_7_44.png)
-
-
-
-![png](output_7_45.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7eb6dfd50>
-
-
-
-![png](output_7_47.png)
-
-
-     Question [genome/1895177]: Who has blond hair?
-    Correct Answer:  woman
-    Prediction : woman
-
-
-![png](output_7_49.png)
-
-
-
-![png](output_7_50.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7eb391850>
-
-
-
-![png](output_7_52.png)
-
-
-
-![png](output_7_53.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7eb1e6e90>
-
-
-
-![png](output_7_55.png)
-
-
-     Question [genome/1523613]: Where is girl walking?
-    Correct Answer:  sidewalk
-    Prediction : sidewalk
-
-
-![png](output_7_57.png)
-
-
-
-![png](output_7_58.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7e8df8290>
-
-
-
-![png](output_7_60.png)
-
-
-
-![png](output_7_61.png)
-
-
-
-    <matplotlib.figure.Figure at 0x7fa7e8bc41d0>
-
-
-
-![png](output_7_63.png)
-
-
-     Question [genome/1886570]: Where is the cake?
-    Correct Answer:  plate
+![png](output_10_25.png)
+
+
+
+![png](output_10_26.png)
+
+
+
+
+
+
+![png](output_10_28.png)
+
+
+
+![png](output_10_29.png)
+
+
+
+
+
+
+![png](output_10_31.png)
+
+
+     Relveant Visual Genome relations
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+      <th>16</th>
+      <th>17</th>
+      <th>18</th>
+      <th>19</th>
+      <th>20</th>
+      <th>21</th>
+      <th>22</th>
+      <th>23</th>
+      <th>24</th>
+      <th>25</th>
+      <th>26</th>
+      <th>27</th>
+      <th>28</th>
+      <th>29</th>
+      <th>30</th>
+      <th>31</th>
+      <th>32</th>
+      <th>33</th>
+      <th>34</th>
+      <th>35</th>
+      <th>36</th>
+      <th>37</th>
+      <th>38</th>
+      <th>39</th>
+      <th>40</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>biker wears helmet</td>
+      <td>biker on motorcycle</td>
+      <td>man holding paper</td>
+      <td>light on motorcycle</td>
+      <td>person on bike</td>
+      <td>tree touches sky</td>
+      <td>man behind fence</td>
+      <td>biker wears goggles</td>
+      <td>biker wears glove</td>
+      <td>bike has wheel</td>
+      <td>biker wears jacket</td>
+      <td>person on bike</td>
+      <td>man wears shirt</td>
+      <td>man holding paper</td>
+      <td>circle on handlebars</td>
+      <td>biker with helmet</td>
+      <td>circle with 56</td>
+      <td>59 on bike</td>
+      <td>biker wears goggles</td>
+      <td>man talking to biker</td>
+      <td>biker wears jacket</td>
+      <td>biker wears glove</td>
+      <td>bike in shade</td>
+      <td>biker wears goggles</td>
+      <td>circle on motorcycle</td>
+      <td>56 on circle</td>
+      <td>light on motorcycle</td>
+      <td>59 on bike</td>
+      <td>biker wears helmet</td>
+      <td>person wears helmet</td>
+      <td>man wearing jacket</td>
+      <td>man has ear</td>
+      <td>man hold paper</td>
+      <td>circle on motorcycle</td>
+      <td>56 on circle</td>
+      <td>biker wears glove</td>
+      <td>biker wears glove</td>
+      <td>light on motorcycle</td>
+      <td>circle on motorcycle</td>
+      <td>biker on motorcycle</td>
+      <td>man next to motorcycle</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+      <th>16</th>
+      <th>17</th>
+      <th>18</th>
+      <th>19</th>
+      <th>20</th>
+      <th>21</th>
+      <th>22</th>
+      <th>23</th>
+      <th>24</th>
+      <th>25</th>
+      <th>26</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>56 on circle</td>
+      <td>circle on motorcycle</td>
+      <td>light on motorcycle</td>
+      <td>biker wears helmet</td>
+      <td>circle on motorcycle</td>
+      <td>man behind fence</td>
+      <td>biker wears jacket</td>
+      <td>biker wears glove</td>
+      <td>biker with helmet</td>
+      <td>light on motorcycle</td>
+      <td>biker wears goggles</td>
+      <td>circle with 56</td>
+      <td>circle on handlebars</td>
+      <td>biker on motorcycle</td>
+      <td>biker wears jacket</td>
+      <td>biker wears glove</td>
+      <td>biker wears goggles</td>
+      <td>man talking to biker</td>
+      <td>biker wears helmet</td>
+      <td>biker wears goggles</td>
+      <td>56 on circle</td>
+      <td>biker wears glove</td>
+      <td>biker wears glove</td>
+      <td>light on motorcycle</td>
+      <td>circle on motorcycle</td>
+      <td>biker on motorcycle</td>
+      <td>man next to motorcycle</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    Question [genome/1796286]: Where is the vase?
+    Correct Answer:  stand
     Prediction : table
 
 
-![png](output_7_65.png)
+![png](output_10_37.png)
 
 
 
-![png](output_7_66.png)
+![png](output_10_38.png)
 
 
 
-    <matplotlib.figure.Figure at 0x7fa7e6e33b10>
 
 
 
-![png](output_7_68.png)
+![png](output_10_40.png)
 
 
 
-![png](output_7_69.png)
+![png](output_10_41.png)
 
 
 
-    <matplotlib.figure.Figure at 0x7fa7e63fefd0>
 
 
 
-![png](output_7_71.png)
+![png](output_10_43.png)
 
 
-     Question [genome/1553404]: Where is the garage?
-    Correct Answer:  background
-    Prediction : background
-
-
-![png](output_7_73.png)
+     Relveant Visual Genome relations
 
 
 
-![png](output_7_74.png)
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>vase on display</td>
+      <td>handle on vase</td>
+      <td>mouth of vase</td>
+      <td>base of blue pitcher</td>
+      <td>light reflected off a pitcher</td>
+      <td>light reflected off a pitcher</td>
+      <td>light shining on vase</td>
+      <td>handle on vase</td>
+      <td>lip of vase</td>
+      <td>neck of vase</td>
+      <td>handle of vase</td>
+      <td>top of vase</td>
+      <td>stand behind vase</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
 
 
 
-    <matplotlib.figure.Figure at 0x7fa7e50d2dd0>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>lip of vase</td>
+      <td>neck of vase</td>
+      <td>light shining on vase</td>
+      <td>handle on vase</td>
+      <td>stand behind vase</td>
+      <td>handle of vase</td>
+      <td>top of vase</td>
+      <td>light reflected off a pitcher</td>
+      <td>light reflected off a pitcher</td>
+      <td>mouth of vase</td>
+      <td>base of blue pitcher</td>
+      <td>vase on display</td>
+      <td>handle on vase</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    Question [genome/1100727]: What color is the car?
+    Correct Answer:  black
+    Prediction : black
+
+
+![png](output_10_49.png)
 
 
 
-![png](output_7_76.png)
+![png](output_10_50.png)
 
 
 
-![png](output_7_77.png)
 
 
 
-    <matplotlib.figure.Figure at 0x7fa7e49c7ed0>
+![png](output_10_52.png)
 
 
 
-![png](output_7_79.png)
-
-
-    
+![png](output_10_53.png)
 
 
 
-```python
-def get_matching_relations(kb_relations,relation,subject=None,obj = None):
-  matching = []
 
-  if obj is None and subject is not None:
-    for rel in kb_relations:
-      if rel[1] == relation and rel[0] == subject:
-        matching.append(' '.join(rel))
-  elif subject is None and obj is not None: 
-    for rel in kb_relations:
-      if rel[1] == relation and rel[2] == obj:
-        matching.append(' '.join(rel))
-  else:
-    for rel in kb_relations:
-      if rel[1] == relation and rel[0] == subject and rel[2] == obj:
-        matching.append(' '.join(rel))
-  return matching
-```
+
+
+![png](output_10_55.png)
+
+
+     Relveant Visual Genome relations
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+      <th>16</th>
+      <th>17</th>
+      <th>18</th>
+      <th>19</th>
+      <th>20</th>
+      <th>21</th>
+      <th>22</th>
+      <th>23</th>
+      <th>24</th>
+      <th>25</th>
+      <th>26</th>
+      <th>27</th>
+      <th>28</th>
+      <th>29</th>
+      <th>30</th>
+      <th>31</th>
+      <th>32</th>
+      <th>33</th>
+      <th>34</th>
+      <th>35</th>
+      <th>36</th>
+      <th>37</th>
+      <th>38</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>dog in seat</td>
+      <td>dog wearing collar</td>
+      <td>permit in car</td>
+      <td>permit hanging on mirror</td>
+      <td>car on road</td>
+      <td>truck on road</td>
+      <td>house beside road</td>
+      <td>mirror on car</td>
+      <td>wiper on car</td>
+      <td>wiper on car</td>
+      <td>dog wearing collar</td>
+      <td>dog shows toungue</td>
+      <td>dog behind steering wheel</td>
+      <td>dog has eye</td>
+      <td>dog has eye</td>
+      <td>dog has ear</td>
+      <td>dog has ear</td>
+      <td>dog has nose</td>
+      <td>permit on mirror</td>
+      <td>dog sitting in car</td>
+      <td>dog in seat</td>
+      <td>steering wheel in car</td>
+      <td>curb in road</td>
+      <td>curb in road</td>
+      <td>curb in road</td>
+      <td>curb has grass</td>
+      <td>permit hanging on mirror</td>
+      <td>dog behind steering wheel</td>
+      <td>dog in car</td>
+      <td>dog in car</td>
+      <td>tip on wiper</td>
+      <td>mirror on windshield</td>
+      <td>dog in car</td>
+      <td>permit on mirror</td>
+      <td>dog behind steering wheel</td>
+      <td>car on road</td>
+      <td>mirror holds permit</td>
+      <td>mirror on car</td>
+      <td>house behind car</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+      <th>16</th>
+      <th>17</th>
+      <th>18</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>dog has nose</td>
+      <td>dog has ear</td>
+      <td>dog in seat</td>
+      <td>dog wearing collar</td>
+      <td>dog behind steering wheel</td>
+      <td>dog sitting in car</td>
+      <td>dog in seat</td>
+      <td>dog behind steering wheel</td>
+      <td>dog shows toungue</td>
+      <td>dog in car</td>
+      <td>dog has eye</td>
+      <td>tip on wiper</td>
+      <td>dog has ear</td>
+      <td>dog has eye</td>
+      <td>wiper on car</td>
+      <td>dog in car</td>
+      <td>dog wearing collar</td>
+      <td>dog in car</td>
+      <td>dog behind steering wheel</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    Question [genome/1779529]: What are the animals close to?
+    Correct Answer:  water
+    Prediction : water
+
+
+![png](output_10_61.png)
+
+
+
+![png](output_10_62.png)
+
+
+
+
+
+
+![png](output_10_64.png)
+
+
+
+![png](output_10_65.png)
+
+
+
+
+
+
+![png](output_10_67.png)
+
+
+     Relveant Visual Genome relations
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>elephant at water</td>
+      <td>tail on elephant</td>
+      <td>grass near water</td>
+      <td>trunk on elephant</td>
+      <td>elephants on hole</td>
+      <td>elephants are by river</td>
+      <td>grass along riverside</td>
+      <td>log on ground</td>
+      <td>boat on water</td>
+      <td>elephants by water</td>
+      <td>elephant next to water</td>
+      <td>elephant next to water</td>
+      <td>elephant next to water</td>
+      <td>foliage next to water</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>tail on elephant</td>
+      <td>elephant at water</td>
+      <td>elephants are by river</td>
+      <td>elephants by water</td>
+      <td>elephant next to water</td>
+      <td>grass along riverside</td>
+      <td>elephant next to water</td>
+      <td>foliage next to water</td>
+      <td>boat on water</td>
+      <td>elephants on hole</td>
+      <td>trunk on elephant</td>
+      <td>grass near water</td>
+      <td>elephant next to water</td>
+      <td>log on ground</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    Question [genome/1803386]: What is near the table?
+    Correct Answer:  wall
+    Prediction : chair
+
+
+![png](output_10_73.png)
+
+
+
+![png](output_10_74.png)
+
+
+
+![png](output_10_76.png)
+
+
+
+![png](output_10_77.png)
+
+
+![png](output_10_79.png)
+
+
+     Relveant Visual Genome relations
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+      <th>16</th>
+      <th>17</th>
+      <th>18</th>
+      <th>19</th>
+      <th>20</th>
+      <th>21</th>
+      <th>22</th>
+      <th>23</th>
+      <th>24</th>
+      <th>25</th>
+      <th>26</th>
+      <th>27</th>
+      <th>28</th>
+      <th>29</th>
+      <th>30</th>
+      <th>31</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>woman wearing black shirt</td>
+      <td>fork lying on top of table</td>
+      <td>fork lying on top of table</td>
+      <td>utensil lying on top of table</td>
+      <td>utensil lying on top of table</td>
+      <td>utensil lying on top of table</td>
+      <td>utensil lying on top of table</td>
+      <td>cup containing water</td>
+      <td>cup sitting on top of table</td>
+      <td>cup containing water</td>
+      <td>cup sitting on top of table</td>
+      <td>bottle containing wine</td>
+      <td>bottle standing on top of table</td>
+      <td>woman wearing watch</td>
+      <td>hair belonging to woman</td>
+      <td>red hair belonging to woman</td>
+      <td>glass containing wine</td>
+      <td>glass tumbler sitting on top of table</td>
+      <td>bottle next to glass</td>
+      <td>label on bottle</td>
+      <td>lady with hair</td>
+      <td>lady with hair</td>
+      <td>laptop on table</td>
+      <td>wine bottle on table</td>
+      <td>wine glass on table</td>
+      <td>glass contains water</td>
+      <td>woman with red hair</td>
+      <td>woman sitting at a table</td>
+      <td>woman sitting at a table</td>
+      <td>wall near table</td>
+      <td>computer on table</td>
+      <td>strings on table</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>woman wearing watch</td>
+      <td>utensil lying on top of table</td>
+      <td>glass contains water</td>
+      <td>fork lying on top of table</td>
+      <td>cup containing water</td>
+      <td>cup containing water</td>
+      <td>utensil lying on top of table</td>
+      <td>utensil lying on top of table</td>
+      <td>glass containing wine</td>
+      <td>label on bottle</td>
+      <td>cup sitting on top of table</td>
+      <td>cup sitting on top of table</td>
+      <td>wine glass on table</td>
+      <td>fork lying on top of table</td>
+      <td>glass tumbler sitting on top of table</td>
+      <td>utensil lying on top of table</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    Question [genome/992676]: What color are the man's pants?
+    Correct Answer:  black
+    Prediction : black
+
+
+![png](output_10_85.png)
+
+
+
+![png](output_10_86.png)
+
+
+
+
+
+
+![png](output_10_88.png)
+
+
+
+![png](output_10_89.png)
+
+
+
+![png](output_10_91.png)
+
+
+     Relveant Visual Genome relations
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+      <th>16</th>
+      <th>17</th>
+      <th>18</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>man flying kite</td>
+      <td>man flying kite</td>
+      <td>kite has tail</td>
+      <td>man flying kite</td>
+      <td>kite has colors</td>
+      <td>man flying kite</td>
+      <td>sand on beach</td>
+      <td>kite has a ribbon</td>
+      <td>man flying kite</td>
+      <td>man has a beard</td>
+      <td>sand has tracks</td>
+      <td>kite has a tail</td>
+      <td>sand has tracks</td>
+      <td>wave on shore</td>
+      <td>sand has footprints</td>
+      <td>man has pants</td>
+      <td>man has head</td>
+      <td>water has ripples</td>
+      <td>man flying kite</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>man has pants</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    Question [genome/1620526]: How the sand looks like?
+    Correct Answer:  brown
+    Prediction : wet
+
+
+![png](output_10_97.png)
+
+
+
+![png](output_10_98.png)
+
+
+
+
+
+
+![png](output_10_100.png)
+
+
+
+![png](output_10_101.png)
+
+
+
+
+
+
+![png](output_10_103.png)
+
+
+     Relveant Visual Genome relations
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+      <th>16</th>
+      <th>17</th>
+      <th>18</th>
+      <th>19</th>
+      <th>20</th>
+      <th>21</th>
+      <th>22</th>
+      <th>23</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>man holding surfboard</td>
+      <td>surfboarder on beach</td>
+      <td>name on wet suit</td>
+      <td>sand on beach</td>
+      <td>man wearing wetsuit</td>
+      <td>man walking out of water</td>
+      <td>waves hitting beach</td>
+      <td>man holding surfboard</td>
+      <td>man wearing wetsuit</td>
+      <td>man on beach</td>
+      <td>man bare foot</td>
+      <td>surfboard in arm</td>
+      <td>feet walking in sand</td>
+      <td>guy holding board</td>
+      <td>guy wearing wetsuit</td>
+      <td>guy wearing wetsuit</td>
+      <td>seaweed on sand</td>
+      <td>seaweed on beach</td>
+      <td>board attached to arm</td>
+      <td>two hands of man</td>
+      <td>man's head has black hair</td>
+      <td>man carrying flippers</td>
+      <td>man walking on sand</td>
+      <td>hand of a man</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>seaweed on sand</td>
+      <td>seaweed on beach</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    Question [genome/1700323]: Who has facial hair?
+    Correct Answer:  man
+    Prediction : man
+
+
+![png](output_10_109.png)
+
+
+
+![png](output_10_110.png)
+
+
+
+
+
+![png](output_10_112.png)
+
+
+
+![png](output_10_113.png)
+
+
+
+
+
+
+![png](output_10_115.png)
+
+
+     Relveant Visual Genome relations
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+      <th>11</th>
+      <th>12</th>
+      <th>13</th>
+      <th>14</th>
+      <th>15</th>
+      <th>16</th>
+      <th>17</th>
+      <th>18</th>
+      <th>19</th>
+      <th>20</th>
+      <th>21</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>man makes face</td>
+      <td>man has glasses</td>
+      <td>man has beard</td>
+      <td>man holds hot dog</td>
+      <td>ketchup on hot dog</td>
+      <td>man has nose</td>
+      <td>man has ear</td>
+      <td>ketchup on hot dog</td>
+      <td>man has neck</td>
+      <td>man has glasses</td>
+      <td>cheese on hot dog</td>
+      <td>car has front wheel</td>
+      <td>man has beard</td>
+      <td>hot dog on roll</td>
+      <td>road outside window</td>
+      <td>man has finger</td>
+      <td>man has shirt</td>
+      <td>man has collar</td>
+      <td>cheese in hot dog</td>
+      <td>man holds hot dog</td>
+      <td>man wears shirt</td>
+      <td>man has facial hair</td>
+    </tr>
+  </tbody>
+</table>
+
+
+    KB Labels vector
+
+
+
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+      <th>6</th>
+      <th>7</th>
+      <th>8</th>
+      <th>9</th>
+      <th>10</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>man has collar</td>
+      <td>man has neck</td>
+      <td>man has glasses</td>
+      <td>man has beard</td>
+      <td>car has front wheel</td>
+      <td>man has beard</td>
+      <td>man has glasses</td>
+      <td>man makes face</td>
+      <td>man has facial hair</td>
+      <td>man has nose</td>
+      <td>man has ear</td>
+    </tr>
+  </tbody>
+</table>
